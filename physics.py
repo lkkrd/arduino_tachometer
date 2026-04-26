@@ -180,6 +180,7 @@ class ACPhysics:
             "brake": self.physics.brake,
             "fuel": self.physics.fuel,
             "packet": self.physics.packetId,
+            "wheelSlip": self.physics.wheelSlip,
         }
 
     # =========================
