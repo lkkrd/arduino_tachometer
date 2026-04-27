@@ -4,17 +4,37 @@ import math
 import time
 import mmap
 import ctypes
+import json
+import os
 from physics import ACPhysics, ACStatic, MockPhysics
+
+
+class CarConfigLoader:
+    def __init__(self, car):
+        self.car = car
+        self.path = rf"C:\Users\Guest\Desktop\telemetry\cars_config\{car}.json"
+        if not os.path.exists(self.path):
+            self.car = "Default"
+            self.path = rf"C:\Users\Guest\Desktop\telemetry\cars_config\default.json"
+
+    def load(self):
+        print(f"Loaded car config: {self.car}")
+        with open(self.path) as f:
+            return json.load(f)
 
 
 class App:
     def __init__(self, root):
-        self.root = root
-        self.root.title("Assetto Corsa Telemetry")
-
         # self.physics = connect()
         self.physics = ACPhysics()
         self.static = ACStatic()
+        self.car = self.static.get()["car"]
+        self.car_config_loader = CarConfigLoader(car)
+        self.car_config = self.car_config_loader.load()
+
+        # window
+        self.root = root
+        self.root.title(f"Assetto Corsa Telemetry: {self.car}")
 
         # Labels
         self.speed_label = tk.Label(root, text="Speed: --- km/h", font=("Arial", 16))
@@ -54,22 +74,33 @@ class App:
         self.last_packet = -1
         self.update()
 
-    def update_dot_color(self, maxrpm=7000):
+    def update_dot_color(self):
         rpm = self.physics.get()["rpm"]
-        rpm = max(0, min(maxrpm, rpm))
+        midrpm = self.car_config["midrpm"]
+        maxrpm = self.car_config["maxrpm"]
+
+        def get_thing(
+            rpm,
+            midrpm=midrpm,
+            maxrpm=maxrpm,
+        ):
+            return int(0 + (rpm - midrpm) * (255 - 0) / (maxrpm - midrpm))
 
         # przeliczanie koloru
         ratio = rpm / maxrpm
 
-        r = int(255 * ratio)
-        g = int(255 * (1 - ratio))
+        r = max(0, get_thing(rpm))
+        g = 255 - max(0, get_thing(rpm))
         b = 0
 
         # clamp RGB (na wszelki wypadek)
         r = max(0, min(255, r))
         g = max(0, min(255, g))
 
-        self.canvas.itemconfig(self.dot, fill=f"#{r:02x}{g:02x}{b:02x}")
+        if ratio > 0.95:
+            self.canvas.itemconfig(self.dot, fill=f"#DD00FF")
+        else:
+            self.canvas.itemconfig(self.dot, fill=f"#{r:02x}{g:02x}{b:02x}")
 
     def update_slip_dots(self, fl, fr, rl, rr, r=10):
         w = self.canvas.winfo_width()
