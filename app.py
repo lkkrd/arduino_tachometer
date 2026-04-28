@@ -6,21 +6,7 @@ import mmap
 import ctypes
 import json
 import os
-from physics import ACPhysics, ACStatic, MockPhysics
-
-
-class CarConfigLoader:
-    def __init__(self, car):
-        self.car = car
-        self.path = rf"C:\Users\Guest\Desktop\telemetry\cars_config\{car}.json"
-        if not os.path.exists(self.path):
-            self.car = "Default"
-            self.path = rf"C:\Users\Guest\Desktop\telemetry\cars_config\default.json"
-
-    def load(self):
-        print(f"Loaded car config: {self.car}")
-        with open(self.path) as f:
-            return json.load(f)
+from physics import ACPhysics, ACStatic, MockPhysics, PhysicsConnector
 
 
 class App:
@@ -28,9 +14,9 @@ class App:
         # self.physics = connect()
         self.physics = ACPhysics()
         self.static = ACStatic()
-        self.car = self.static.get()["car"]
-        self.car_config_loader = CarConfigLoader(car)
-        self.car_config = self.car_config_loader.load()
+        self.conn = PhysicsConnector()
+        self.car = self.conn.get("carModel")
+        self.car_config = self.conn.car_config
 
         # window
         self.root = root
@@ -75,9 +61,10 @@ class App:
         self.update()
 
     def update_dot_color(self):
-        rpm = self.physics.get()["rpm"]
-        midrpm = self.car_config["midrpm"]
-        maxrpm = self.car_config["maxrpm"]
+        d = self.conn.get("rpms", "midrpm", "maxrpm")
+        rpm = d["rpms"]
+        midrpm = d["midrpm"]
+        maxrpm = d["maxrpm"]
 
         def get_thing(
             rpm,
@@ -125,23 +112,17 @@ class App:
 
     def update(self):
 
-        data = self.physics.get()
-        speed = data["speed"]
-        rpm = data["rpm"]
-        gear = data["gear"]
-        gas = data["gas"]
-        brake = data["brake"]
-        slip = data["wheelSlip"]
-        fl_slip, fr_slip, rl_slip, rr_slip = slip
+        fl_slip, fr_slip, rl_slip, rr_slip = self.conn.get("wheelSlip")
 
         if not self.physics:
             self.status_label.config(text="Brak połączenia z grą")
         else:
-            self.speed_label.config(text=f"Speed: {speed:.0f} km/h")
-            self.rpm_label.config(text=f"RPM: {rpm}")
-            self.gear_label.config(text=f"Gear: {gear}")
-            self.gas_label.config(text=f"Gas: {gas*100:.0f}")
-            self.brake_label.config(text=f"Brake: {brake*100:.0f}%")
+            d = self.conn.get("speedKmh", "rpms", "gear", "gas", "brake")
+            self.speed_label.config(text=f"Speed: {d['speedKmh']:.0f} km/h")
+            self.rpm_label.config(text=f"RPM: {d['rpms']}")
+            self.gear_label.config(text=f"Gear: {d['gear'] - 1}")
+            self.gas_label.config(text=f"Gas: {d['gas']*100:.0f}")
+            self.brake_label.config(text=f"Brake: {d['brake']*100:.0f}%")
             # self.slip_label.config(text=f"Slip: {list(slip)}")
 
             self.update_dot_color()
@@ -151,11 +132,6 @@ class App:
         # odświeżanie co ~16 ms (~60 FPS)
         self.root.after(16, self.update)
 
-
-ac = ACPhysics()
-acs = ACStatic()
-car = acs.get()["car"]
-print(acs.get())
 
 # =========================
 # START APP

@@ -1,6 +1,8 @@
 import mmap
 import ctypes
 import random
+import json
+import os
 
 
 class MockPhysics:
@@ -40,6 +42,20 @@ class MockPhysics:
         self.fuel = max(0.0, self.fuel)
 
         self.packetId += 1
+
+
+class CarConfigLoader:
+    def __init__(self, car):
+        self.car = car
+        self.path = rf"C:\Users\Guest\Desktop\telemetry\cars_config\{car}.json"
+        if not os.path.exists(self.path):
+            self.car = "Default"
+            self.path = rf"C:\Users\Guest\Desktop\telemetry\cars_config\default.json"
+
+    def load(self):
+        print(f"Loaded car config: {self.car}")
+        with open(self.path) as f:
+            return json.load(f)
 
 
 class ACPhysics:
@@ -172,15 +188,21 @@ class ACPhysics:
 
         self.last_packet = self.physics.packetId
 
+        def convert(value):
+            # stringi / bytes
+            if isinstance(value, bytes):
+                return value.decode("utf-8", errors="ignore").rstrip("\x00")
+            # tablice ctypes
+            if hasattr(value, "__len__") and not isinstance(value, (str, bytes)):
+                try:
+                    return [convert(v) for v in value]
+                except:
+                    return value
+            return value
+
         return {
-            "speed": self.physics.speedKmh,
-            "rpm": self.physics.rpms,
-            "gear": self.physics.gear - 1,
-            "gas": self.physics.gas,
-            "brake": self.physics.brake,
-            "fuel": self.physics.fuel,
-            "packet": self.physics.packetId,
-            "wheelSlip": self.physics.wheelSlip,
+            field_name: convert(getattr(self.physics, field_name))
+            for field_name, _ in self.physics._fields_
         }
 
     # =========================
@@ -241,59 +263,50 @@ class ACStatic:
         except Exception:
             return False
 
-    # =========================
-    # POBIERANIE DANYCH
-    # =========================
     def get(self):
         if not self.connected:
             return None
 
-        s = self.static
-
-        def clean_str(value):
+        def convert(value):
+            # stringi / bytes
             if isinstance(value, bytes):
                 return value.decode("utf-8", errors="ignore").rstrip("\x00")
-            return str(value).rstrip("\x00")
+            # tablice ctypes
+            if hasattr(value, "__len__") and not isinstance(value, (str, bytes)):
+                try:
+                    return [convert(v) for v in value]
+                except:
+                    return value
+            return value
 
         return {
-            # ===== IDENTYFIKACJA =====
-            "car": clean_str(s.carModel),
-            "track": clean_str(s.track),
-            "player": f"{clean_str(s.playerName)} {clean_str(s.playerSurname)}",
-            # ===== WERSJE =====
-            "sm_version": clean_str(s.smVersion),
-            "ac_version": clean_str(s.acVersion),
-            # ===== SESJA =====
-            "sessions": s.numberOfSessions,
-            "cars_on_session": s.numCars,
-            "sector_count": s.sectorCount,
-            # ===== PARAMETRY SILNIKA =====
-            "max_rpm": s.maxRpm,
-            "max_power": s.maxPower,
-            "max_torque": s.maxTorque,
-            "max_fuel": s.maxFuel,
-            "max_turbo_boost": s.maxTurboBoost,
-            # ===== ZAWIESZENIE / KOŁA =====
-            "suspension_travel": list(s.suspensionMaxTravel),
-            "tyre_radius": list(s.tyreRadius),
-            # ===== SUROWE TABLICE =====
-            "suspension_max_travel_raw": [
-                s.suspensionMaxTravel[0],
-                s.suspensionMaxTravel[1],
-                s.suspensionMaxTravel[2],
-                s.suspensionMaxTravel[3],
-            ],
-            "tyre_radius_raw": [
-                s.tyreRadius[0],
-                s.tyreRadius[1],
-                s.tyreRadius[2],
-                s.tyreRadius[3],
-            ],
+            field_name: convert(getattr(self.static, field_name))
+            for field_name, _ in self.static._fields_
         }
 
-    # =========================
-    # CLEANUP
-    # =========================
     def close(self):
         if self.mm:
             self.mm.close()
+
+
+class PhysicsConnector:
+    def __init__(self):
+        self.physics = ACPhysics()
+        self.static = ACStatic()
+        self.car_loader = CarConfigLoader(self.static.get()["carModel"])
+        self.car_config = self.car_loader.load()
+
+    def get(self, *args):
+        self.physics.update()
+
+        d_physics = self.physics.get()  # returns dict
+        d_static = self.static.get()  # returns dict
+
+        combined = d_physics | d_static | self.car_config
+        if len(args) > 1:
+            return {arg: combined.get(arg) for arg in args}
+        return combined[args[0]]
+
+
+conn = PhysicsConnector()
+print(conn.get("speedKmh", "rpms", "wheelSlip"))
